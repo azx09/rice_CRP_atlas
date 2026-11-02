@@ -1,37 +1,29 @@
 ###################################
-library(tidyverse)
-library(glmGamPoi)
-library(ggthemes)
-library(ggrepel)
-library(harmony)
-library(patchwork)
-library(tidyr)
+
 library(Seurat)
 library(dplyr)
 library(ggplot2)
-library(cowplot)
-library(sctransform)
-library(RColorBrewer)
-library(scCustomize)
-library(Nebulosa)
-library(viridis)
-library(ggsci)
-library(bluster)
-library(aricode)
+library(patchwork)
+library(glmGamPoi)
 library(ClustAssess)
-# 1. Paths and sample settings 
+
+# ============================================================
+# Part 1: Build CK_all object from CK1/CK2/CK3
+# ============================================================
+
+# 1. Paths and sample settings
 # ------------------------------------------------------------
 # Root directory that contains CK1/ CK2/ CK3/ folders;
 # each sample folder must contain outs/filtered_feature_bc_matrix/
-data_root <- "/path/to/your/cellranger/outputs"
+data_root <- "path/to/cellranger/outputs"
 
 samples <- c("CK1", "CK2", "CK3")
 
 # Rice mitochondrial gene list (one gene ID per line)
-mt_file <- "/path/to/rice_mt_genes.txt"
+mt_file <- "path/to/rice_mt_genes.txt"
 
-# Where CK_all.rds will be saved (same folder as your ClustAssess output)
-output_dir <- "~/data-24T/maoshuyu/data/CR-snRNA-spat/output/snRNA/"
+# Where CK_all.rds will be saved
+output_dir <- "path/to/snRNA_output/"
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 # QC thresholds: no upper limit on nFeature_RNA; percent.mt < 5
@@ -79,18 +71,14 @@ print(table(CK_all$orig.ident))
 # ------------------------------------------------------------
 # 4. QC: rice mitochondrial percentage + filtering
 # ------------------------------------------------------------
-# Read the rice mitochondrial gene list.
-# readLines + trim + drop empty lines/header-like text handles most formats.
 mt_genes <- readLines(mt_file)
 mt_genes <- trimws(mt_genes)
 mt_genes <- mt_genes[mt_genes != ""]
-# Drop an obvious header if present (e.g. "gene", "gene_id", "GeneID")
 mt_genes <- mt_genes[!tolower(mt_genes) %in% c("gene", "gene_id", "geneid", "genes")]
 mt_genes <- unique(mt_genes)
 
 cat("Mitochondrial genes in list:", length(mt_genes), "\n")
 
-# Sanity check: how many of the listed genes are actually present in the object?
 mt_present <- intersect(mt_genes, rownames(CK_all))
 mt_missing <- setdiff(mt_genes, rownames(CK_all))
 
@@ -100,7 +88,6 @@ if (length(mt_missing) > 0) {
   cat("Example missing IDs:\n"); print(head(mt_missing, 10))
 }
 
-# Compute percent.mt using the explicit gene list
 CK_all[["percent.mt"]] <- PercentageFeatureSet(CK_all, features = mt_present)
 
 CK_all <- subset(
@@ -159,22 +146,22 @@ cat("Clusters:", length(unique(CK_all$seurat_clusters)), "\n")
 cat("Reductions:", paste(names(CK_all@reductions), collapse = ", "), "\n")
 cat("DefaultAssay:", DefaultAssay(CK_all), "\n")
 
-#quality control
+# ============================================================
+# Part 2: ClustAssess clustering stability assessment
+# ============================================================
+
 # ----- 0. Set working directory and Seurat object to use -----
-output_dir <- " "
+output_dir <- "path/to/clustassess_output/"
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 setwd(output_dir)
 
-# Specify the Seurat object name to use here (e.g., "CK_all" or "CK_all")
-object_name <- "CK_all"   # Modify according to actual situation
+object_name <- "CK_all"
 
-# Check whether the object exists
 if (!exists(object_name)) {
   stop(paste("Error: object", object_name, "does not exist. Please check."))
 }
 obj <- get(object_name)
 
-# Confirm that the object contains PCA reduction and clustering results
 if (!"pca" %in% Reductions(obj)) {
   stop("PCA was not found in the object. Please run RunPCA first.")
 }
@@ -187,10 +174,8 @@ cat("Number of cells:", ncol(obj), "\n")
 cat("Number of clusters at current resolution:", length(unique(obj$seurat_clusters)), "\n")
 
 # ----- 1. Extract PCA matrix and adjacency graph -----
-# Use parameters consistent with the original analysis (dims = 1:40, k.param = 20)
 pca_matrix <- Embeddings(obj, reduction = "pca")[, 1:40]
 
-# Build adjacency graph (note: compute.SNN = FALSE returns an adjacency matrix)
 adj_matrix <- FindNeighbors(pca_matrix, 
                             k.param = 20, 
                             nn.method = "rann", 
@@ -199,7 +184,7 @@ adj_matrix <- FindNeighbors(pca_matrix,
 cat("Adjacency matrix constructed, dimensions:", dim(adj_matrix), "\n")
 
 # ----- 2. Run clustering stability assessment -----
-set.seed(2024)   # Ensure reproducibility
+set.seed(2024)
 
 cat("Starting ClustAssess stability assessment, this may take a long time...\n")
 clust_stab_result <- assess_clustering_stability(
@@ -211,19 +196,16 @@ clust_stab_result <- assess_clustering_stability(
 )
 cat("Stability assessment completed.\n")
 
-# Optional: save the result object for direct loading later
 saveRDS(clust_stab_result, file = "clust_stab_result.rds")
 
-# ----- 3. Extract and save summary data (consistent with your previous code) -----
+# ----- 3. Extract and save summary data -----
 cat("\nExtracting and saving data...\n")
 
-# 3.1 Get resolution list
 resolutions <- names(clust_stab_result$split_by_resolution$Louvain)
 resolutions <- as.numeric(resolutions)
 resolutions <- sort(resolutions)
 print(paste("Resolutions:", paste(resolutions, collapse = ", ")))
 
-# 3.2 Overall stability summary table
 summary_list <- list()
 for (res in resolutions) {
   res_key <- as.character(res)
@@ -245,7 +227,6 @@ for (res in resolutions) {
 summary_df <- do.call(rbind, summary_list)
 write.csv(summary_df, "clustering_stability_summary.csv", row.names = FALSE)
 
-# 3.3 ECC statistics for each k under each resolution
 cluster_stab_list <- list()
 for (res in resolutions) {
   res_key <- as.character(res)
@@ -266,7 +247,6 @@ for (res in resolutions) {
 cluster_stab_df <- do.call(rbind, cluster_stab_list)
 write.csv(cluster_stab_df, "clustering_stability_per_k.csv", row.names = FALSE)
 
-# 3.4 Data for resolution = 0.5 (the resolution actually used)
 res_target <- "0.5"
 if (res_target %in% names(clust_stab_result$split_by_resolution$Louvain)) {
   stab_target <- summary_df[summary_df$resolution == 0.5, ]
@@ -292,7 +272,6 @@ if (res_target %in% names(clust_stab_result$split_by_resolution$Louvain)) {
   warning("Resolution ", res_target, " does not exist")
 }
 
-# 3.5 Correspondence between resolution and number of clusters
 k_res_list <- list()
 for (k in names(clust_stab_result$split_by_k$Louvain)) {
   for (res in resolutions) {
@@ -313,7 +292,6 @@ if (length(k_res_list) > 0) {
   k_res_df <- k_res_df[order(k_res_df$resolution), ]
   write.csv(k_res_df, "resolution_vs_cluster_number.csv", row.names = FALSE)
 } else {
-  # Fallback
   k_res_df <- data.frame(
     resolution = resolutions,
     n_clusters = sapply(resolutions, function(r) {
@@ -327,15 +305,12 @@ if (length(k_res_list) > 0) {
 cat("Generating plots...\n")
 p1 <- plot_clustering_overall_stability(clust_stab_result)
 ggsave("plot_clustering_overall_stability.pdf", plot = p1, width = 8, height = 6)
-#ggsave("plot_clustering_overall_stability.png", plot = p1, width = 8, height = 6, dpi = 300)
 
 p2 <- plot_clustering_per_value_stability(clust_stab_result, value_type = "resolution")
 ggsave("plot_clustering_per_value_stability.pdf", plot = p2, width = 10, height = 8)
-#ggsave("plot_clustering_per_value_stability.png", plot = p2, width = 10, height = 8, dpi = 300)
 
 p3 <- plot_k_resolution_corresp(clust_stab_result)
 ggsave("plot_k_resolution_corresp.pdf", plot = p3, width = 8, height = 6)
-#ggsave("plot_k_resolution_corresp.png", plot = p3, width = 8, height = 6, dpi = 300)
 
 # ----- Done -----
 cat("\n========== All results have been saved ==========\n")
@@ -347,9 +322,14 @@ cat("  - clustering_stability_res0.5_summary.csv\n")
 cat("  - clustering_stability_res0.5_per_k.csv\n")
 cat("  - resolution_vs_cluster_number.csv\n")
 cat("  - plot_clustering_overall_stability.pdf/png\n")
-# ------------------------------------------------------------
-# Identify marker genes
-# ------------------------------------------------------------
+cat("  - plot_clustering_per_value_stability.pdf/png\n")
+cat("  - plot_k_resolution_corresp.pdf/png\n")
+cat("  - clust_stab_result.rds (complete result object)\n")
+
+# ============================================================
+# Part 3: Identify marker genes
+# ============================================================
+
 CK_all.markers <- FindAllMarkers(
   CK_all,
   only.pos        = TRUE,
@@ -357,43 +337,33 @@ CK_all.markers <- FindAllMarkers(
   logfc.threshold = 0.25
 )
 
-# Top 6 markers per cluster (ranked by avg_log2FC)
 top6 <- CK_all.markers %>%
   group_by(cluster) %>%
   slice_max(n = 6, order_by = avg_log2FC)
 top6
 
 write.csv(CK_all.markers, "CK_all_anno_allpos.csv", row.names = FALSE)
-# write.csv(top6, "CK_all_top6.csv", row.names = FALSE)
 
-# Top 3 markers per cluster
 top3 <- CK_all.markers %>%
   group_by(cluster) %>%
   slice_max(n = 3, order_by = avg_log2FC)
 top3
-# write.csv(top3, "CK_all_top3.csv", row.names = FALSE)
 
-# ------------------------------------------------------------
-# Heatmap of top 6 markers per cluster
-# ------------------------------------------------------------
 p5 <- DoHeatmap(CK_all, features = unique(top6$gene), size = 1) + NoLegend()
 ggsave(p5, file = "CK_all_top6DoHeatmap.pdf")
 
-# ------------------------------------------------------------
-# Dot plot of top 3 markers per cluster
-# ------------------------------------------------------------
 p6 <- DotPlot(
   CK_all,
   features   = unique(top3$gene),
-  cols       = c("grey", "red"),   # soft grey-to-red gradient
-  dot.scale  = 6,                  # control dot size
-  scale      = TRUE                # scale expression per gene
+  cols       = c("grey", "red"),
+  dot.scale  = 6,
+  scale      = TRUE
 ) +
   coord_flip() +
   theme_classic() +
   theme(
     axis.text.x      = element_text(angle = 45, hjust = 1, size = 8),
-    axis.text.y      = element_text(size = 8, face = "italic"),   # italic gene names
+    axis.text.y      = element_text(size = 8, face = "italic"),
     plot.title       = element_text(hjust = 0.5, face = "bold", size = 14),
     axis.title       = element_blank(),
     panel.grid.major.x = element_line(color = "grey90", linewidth = 0.2)
@@ -402,9 +372,4 @@ p6 <- DotPlot(
   scale_size_continuous(range = c(1, 8)) +
   NoLegend()
 
-# Save figure
 ggsave(p6, file = "CK_all_anno_top3DotPlot.pdf", width = 6, height = 9)
-#
-cat("  - plot_clustering_per_value_stability.pdf/png\n")
-cat("  - plot_k_resolution_corresp.pdf/png\n")
-cat("  - clust_stab_result.rds (complete result object)\n")
