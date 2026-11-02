@@ -25,12 +25,12 @@ CKL4 <- RunPCA(CKL4, verbose = FALSE)
 ElbowPlot(CKL4, ndims = 100)
 CKL4 <- RunUMAP(CKL4, dims = 1:40, verbose = FALSE)
 CKL4 <- FindNeighbors(CKL4, dims = 1:40, verbose = FALSE)
-CKL4 <- FindClusters(CKL4, resolution = 2.5, verbose = FALSE)
+CKL4 <- FindClusters(CKL4, resolution = 2.0, verbose = FALSE)
 DimPlot(CKL4, label = TRUE)
 SpatialDimPlot( CKL4, crop=T)+
   theme(aspect.ratio = 0.9)
 ###############################################
-#修改颜色
+#change color
 colour=c("#008B8B","#C18FC0","#698F3C","#D8549F","#7AC9F0","#825343","#4A93CB","#88898C","#F1572A","#C88447",  
          "#CFD1D2","#4682B4","#77C585","#874F90","#FAA32B","#F4DAB3","#33A3AD","#FFB1BA","#86BD97","#45A3FA","#B9A7B9","#D5AF38",
          "#65A579","#337FC2","#27BCEE","#FFE4B5","#8A2BE2","#228B22","#E9967A","#F5822A","#32CD32","#F0E68C","#FFFFE0","#EE82EE",
@@ -38,11 +38,87 @@ colour=c("#008B8B","#C18FC0","#698F3C","#D8549F","#7AC9F0","#825343","#4A93CB","
 Idents(CKL4)=CKL4$"seurat_clusters"
 #opt_clust为seurat clusters. 
 colors = colour[1:33]
-names(colors) <- Idents(CKL4) %>% levels() ## 命名非常重要 
+names(colors) <- Idents(CKL4) %>% levels() 
 p1 <- SpatialDimPlot( CKL4, cols=colors,pt.size = 1.5,stroke=NA,label = T,label.size = 3,crop=T,repel=T)+
-  theme(aspect.ratio = 0.9) #aspect.ratio < 1：图形更宽（横向拉伸）,aspect.ratio > 1：图形更高（纵向拉伸）
+  theme(aspect.ratio = 0.9) 
 p1
 p2 <- DimPlot(CKL4, reduction = "umap", cols=colour, pt.size = 1.5, repel = TRUE,label= TRUE, label.size = 4)+
   theme(aspect.ratio = 1)
 p2
 ###############################################
+#resolution2.0-detailed merge
+#remove cluster32
+#CKL4_filtered <- subset(CKL4, subset = seurat_clusters != 32)
+unique(CKL4_filtered$seurat_clusters)
+#rename clusters
+CKL4_filtered$celltype <- as.character(CKL4_filtered$seurat_clusters)
+clusters_to_merge <- c(0,6,26,7)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "Ep1"
+clusters_to_merge <- c(14,16)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "Ep2"
+clusters_to_merge <- c(25,1,2,22,24,23)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "Pa"
+clusters_to_merge <- c(4,29)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "CRP_Sh"
+clusters_to_merge <- c(11)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "CRP_Ep-RC"
+clusters_to_merge <- c(18,19,21)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "CRP_Co1"
+clusters_to_merge <- c(8,12)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "CRP_Co2"
+clusters_to_merge <- c(5,31)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "CRG"
+CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 9] <- "CRP_Tr1"
+CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 10] <- "CRP_Tr2"
+#CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 15] <- "CRP_St1"
+#CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 30] <- "CRP_St2"
+#CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 28] <- "CRP_St3"
+clusters_to_merge <- c(15,30,28,20,3)
+CKL4_filtered$celltype[CKL4_filtered$celltype %in% clusters_to_merge] <- "Pe_St"
+CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 13] <- "VB1"
+CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 17] <- "VB2"
+CKL4_filtered$celltype[CKL4_filtered$seurat_clusters == 27] <- "Va_Pi"
+
+unique(CKL4_filtered$celltype)
+
+desired_order <- c("Ep1", "Ep2", "Pa","CRP_Sh","CRP_Ep-RC","CRP_Co1","CRP_Co2","CRG", 
+                   "CRP_Tr1","CRP_Tr2","Pe_St","VB1","VB2","Va_Pi")
+
+CKL4_filtered$celltype <- factor(CKL4_filtered$celltype, levels = desired_order)
+Idents(CKL4_filtered) <- CKL4_filtered$celltype
+
+colour_palette <- c("#008B8B","#C18FC0","#698F3C","#D8549F","#825343","#7AC9F0","#4A93CB","#4682B4","#F1572A","#C88447",  
+         "#CFD1D2","#88898C","#DEB887","#874F90","#FAA32B","#F4DAB3","#33A3AD","#FFB1BA","#86BD97","#45A3FA","#B9A7B9","#D5AF38",
+         "#65A579","#337FC2","#27BCEE","#FFE4B5","#8A2BE2","#228B22","#E9967A","#F5822A","#32CD32","#F0E68C","#FFFFE0","#EE82EE",
+         "#FF6347","#6A5ACD","#9932CC","#8B008B","#8B4513","#77C585")
+
+names(colour_palette) <- desired_order
+
+p1 <- SpatialDimPlot( CKL4_filtered, cols=colour_palette,pt.size = 1.5,stroke = NA, label = F,label.size = 3,repel = TRUE,crop=T)+
+  theme(aspect.ratio = 0.9) 
+p1
+p2 <- DimPlot(CKL4_filtered, reduction = "umap", cols=colour_palette, pt.size = 1.5, repel = TRUE,label= TRUE, label.size = 4)+
+  theme(aspect.ratio = 1)
+p2
+ggsave(p1,file="CK_SpatialDimPlot_Celltype.pdf", width = 8, height = 7)
+ggsave(p2,file="CK_DimPlot_Celltype.pdf", width = 8, height = 7)
+#################################################################
+#marker genes screening
+Idents(CKL4_filtered) <- CKL4_filtered$celltype
+CKL4.markers <- FindAllMarkers(CKL4_filtered, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+top6 <- CKL4.markers %>%  group_by(cluster) %>% slice_max(n = 6, order_by = avg_log2FC)
+top6
+write.csv(CKL4.markers, "CKL4_allpos_celltype.csv", row.names = FALSE)
+write.csv(top6, "CKL4_top6_celltype.csv", row.names = FALSE)
+top3 <- CKL4.markers %>%  group_by(cluster) %>% slice_max(n = 3, order_by = avg_log2FC)
+top3
+write.csv(top3, "CKL4_top3_celltype.csv", row.names = FALSE)
+
+p5<-DoHeatmap(CKL4_filtered, features = unique(top6$gene), size = 0.8)+NoLegend()
+ggsave(p5,file="CK_top6DoHeatmap_celltype.pdf",width = 8, height = 10)
+p6<-DotPlot_scCustom(seurat_object = CKL4_filtered, features = unique(top3$gene), flip_axes = T,
+    x_lab_rotate = TRUE) +
+  theme(
+    axis.text.x = element_text(size = 10, face = "bold",color = "black"), 
+    axis.text.y = element_text(size = 10, face = "bold.italic", color = "black"))
+ggsave(p6,file="CK_top3DotPlot_celltype.pdf", width = 8, height = 10)
