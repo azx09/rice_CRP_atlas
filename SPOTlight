@@ -1,16 +1,15 @@
+######################################
 library(Seurat)
 library(ggplot2)
-library(patchwork)
-library(cowplot)
-library(dplyr)
-library(gridExtra)
 library(SPOTlight)
+library(SingleCellExperiment)
 library(scater)
 library(scran)
 library(scatterpie)
 ######################################
+
 # CK
-CK_all_subset<-subset(CK_all, idents = c("4","6","7","9","10","11","12","20"))
+CK_all_subset <- subset(CK_all, idents = c("4","6","7","9","10","11","12","20"))
 sc_data <- CK_all_subset
 sc_data
 
@@ -31,15 +30,12 @@ pt_genes <- readLines("path/to/rice_pt_genes_mini.txt")
 
 # 2. Data preparation and checks
 # Ensure sc_data has celltype annotation and sp_data has correct spatial coordinates
-# Check the celltype column in the single-cell data
 table(sc_data$celltype)
 head(sc_data@meta.data)
 
-# Check the spatial data
 head(sp_data@meta.data)
 names(sp_data@images)  # Confirm spatial image info
 
-# Recommended: manually build a SingleCellExperiment object
 # 1. Get raw counts
 counts_matrix <- GetAssayData(sc_data, assay = "RNA", slot = "counts")
 
@@ -87,31 +83,27 @@ colLabels(sce) <- colData(sce)$celltype
 mgs <- scoreMarkers(sce, subset.row = genes)
 
 # --------------------------------------------------
-# 1. First, inspect the structure of mgs
+# 1. Inspect the structure of mgs
 # --------------------------------------------------
 cat("Checking mgs structure:\n")
 cat("mgs class:", class(mgs), "\n")
 cat("Number of mgs elements:", length(mgs), "\n")
 cat("mgs names:", names(mgs), "\n\n")
 
-# Check the dimensions of each element
 for (i in names(mgs)) {
     cat("Cell type", i, ":",
         nrow(mgs[[i]]), "rows,",
         ncol(mgs[[i]]), "columns\n")
 }
 
-# Check column names of each element
 cat("\nColumn names of first element:", colnames(mgs[[1]]), "\n")
 
 # --------------------------------------------------
-# 2. Fix the filtering and marker-gene organization code
+# 2. Filter and organize marker genes
 # --------------------------------------------------
-# Filter and organize marker genes (with NULL checks)
 mgs_fil <- lapply(names(mgs), function(i) {
     x <- mgs[[i]]
 
-    # Ensure x is a data frame and has a mean.AUC column
     if (is.null(x) || nrow(x) == 0) {
         cat("Warning: mgs element for cell type", i, "is NULL or missing\n")
         return(NULL)
@@ -122,34 +114,27 @@ mgs_fil <- lapply(names(mgs), function(i) {
         return(NULL)
     }
 
-    # Filter: keep only rows with mean.AUC > 0.7
     x_fil <- x[x$mean.AUC > 0.7, ]
 
-    # Check whether any rows remain after filtering
     if (nrow(x_fil) == 0) {
         cat("Warning: cell type", i, "has no markers after filtering (mean.AUC > 0.7)\n")
         return(NULL)
     }
 
-    # Sort by mean.AUC descending
     x_fil <- x_fil[order(x_fil$mean.AUC, decreasing = TRUE), ]
 
-    # Add gene and cluster columns
     x_fil$gene <- rownames(x_fil)
     x_fil$cluster <- i
 
     return(x_fil)
 })
 
-# Remove NULL elements
 mgs_fil <- mgs_fil[!sapply(mgs_fil, is.null)]
 
-# Check whether any data remain
 if (length(mgs_fil) == 0) {
     stop("Error: markers for all cell types were filtered out. Lower the mean.AUC threshold or check the mgs data.")
 }
 
-# Combine data frames
 mgs_df <- do.call(rbind, mgs_fil)
 
 cat("\nFiltered marker gene data frame:\n")
@@ -161,7 +146,6 @@ print(table(mgs_df$cluster))
 # --------------------------------------------------
 # 3. Validate data (optional)
 # --------------------------------------------------
-# Check each cell type has at least 2 markers
 celltype_counts <- table(mgs_df$cluster)
 problematic_ct <- names(celltype_counts[celltype_counts < 2])
 
@@ -170,18 +154,16 @@ if (length(problematic_ct) > 0) {
         paste(problematic_ct, collapse = ", "), "\n")
     cat("Suggestion: lower the mean.AUC threshold or recompute markers\n")
 }
+
 # --------------------------------------------------
 # 4. Continue with subsequent steps
 # --------------------------------------------------
-
-# Check cell types in sce
 cat("\n=== Checking cell types in sce ===\n")
 if ("celltype" %in% colnames(colData(sce))) {
   cat("sce has a celltype column\n")
   cat("Cell type distribution:\n")
   print(table(colData(sce)$celltype))
 } else {
-  # If sce has no celltype column, try adding it from the original data
   cat("sce has no celltype column, trying to add it from sc_data...\n")
   if ("celltype" %in% colnames(sc_data@meta.data)) {
     colData(sce)$celltype <- sc_data$celltype
@@ -191,14 +173,11 @@ if ("celltype" %in% colnames(colData(sce))) {
   }
 }
 
-# Ensure cell types are character
 colData(sce)$celltype <- as.character(colData(sce)$celltype)
 
 # --------------------------------------------------
-# 5. Split cell indices by identity
+# 5. Match cell types
 # --------------------------------------------------
-
-# Check whether cell types in sce match those in mgs_df
 available_ct_in_sce <- unique(colData(sce)$celltype)
 available_ct_in_mgs <- unique(mgs_df$cluster)
 
@@ -209,7 +188,6 @@ cat("Intersection:", length(intersect(available_ct_in_sce, available_ct_in_mgs))
 cat("Only in sce:", setdiff(available_ct_in_sce, available_ct_in_mgs), "\n")
 cat("Only in mgs_df:", setdiff(available_ct_in_mgs, available_ct_in_sce), "\n")
 
-# Keep only cell types present in both
 common_ct <- intersect(available_ct_in_sce, available_ct_in_mgs)
 
 if (length(common_ct) == 0) {
@@ -219,40 +197,31 @@ if (length(common_ct) == 0) {
 cat("\nCommon cell types to be used:\n")
 print(common_ct)
 
-# Filter mgs_df to common cell types
 mgs_df <- mgs_df[mgs_df$cluster %in% common_ct, ]
-
-# Filter sce to common cell types
 sce <- sce[, colData(sce)$celltype %in% common_ct]
 
-# Update cell type distribution
 colData(sce)$celltype <- factor(colData(sce)$celltype, levels = common_ct)
 
 cat("\nCell type distribution after filtering:\n")
 print(table(colData(sce)$celltype))
 
 # --------------------------------------------------
-
 # 6. Downsample cells
 # --------------------------------------------------
-
-# split cell indices by identity
 idx <- split(seq(ncol(sce)), colData(sce)$celltype)
 
-# downsample to at most n_cells per identity
-n_cells <- 100  # Downsample to at most n_cells per cell type (>=100 recommended for real data)
+n_cells <- 100
 cat("\nDownsampling: at most", n_cells, "cells per cell type\n")
 
 cs_keep <- lapply(idx, function(i) {
     n <- length(i)
     if (n <= n_cells) {
-        return(i)  # If fewer than n_cells, keep all
+        return(i)
     } else {
-        return(sample(i, n_cells))  # Otherwise randomly sample n_cells
+        return(sample(i, n_cells))
     }
 })
 
-# Combine and subset sce
 cells_to_keep <- unlist(cs_keep)
 sce_subset <- sce[, cells_to_keep]
 
@@ -263,15 +232,12 @@ cat("Cell type distribution:\n")
 print(table(colData(sce_subset)$celltype))
 
 # --------------------------------------------------
-
 # 7. Prepare spatial data
 # --------------------------------------------------
-# Check the spatial data
 cat("\n=== Preparing spatial data ===\n")
 cat("Spatial data object class:", class(sp_data), "\n")
 cat("Spatial data assays:", names(sp_data@assays), "\n")
 
-# Decide which assay to use
 if ("SCT" %in% names(sp_data@assays)) {
   DefaultAssay(sp_data) <- "SCT"
   spatial_matrix <- GetAssayData(sp_data, assay = "SCT", slot = "data")
@@ -287,17 +253,14 @@ if ("SCT" %in% names(sp_data@assays)) {
 cat("Spatial matrix dimensions:", dim(spatial_matrix), "\n")
 
 # --------------------------------------------------
-
 # 8. Ensure gene names match
 # --------------------------------------------------
-
 common_genes <- intersect(rownames(sce_subset), rownames(spatial_matrix))
 cat("\nCommon genes:", length(common_genes), "\n")
 
 if (length(common_genes) < 1000) {
   warning("Few common genes; deconvolution accuracy may be affected")
 
-  # Check missing important genes
   if (exists("hvg")) {
     hvg_missing <- setdiff(hvg, common_genes)
     cat("HVGs missing:", length(hvg_missing), "\n")
@@ -307,11 +270,9 @@ if (length(common_genes) < 1000) {
   }
 }
 
-# Filter data
 spatial_matrix <- spatial_matrix[common_genes, ]
 sce_filtered <- sce_subset[common_genes, ]
 
-# Filter mgs_df to markers in common genes
 mgs_df <- mgs_df[mgs_df$gene %in% common_genes, ]
 
 cat("\nData after filtering:\n")
@@ -322,19 +283,15 @@ cat("Cell type distribution in mgs_df:\n")
 print(table(mgs_df$cluster))
 
 # --------------------------------------------------
-
 # 9. Check HVGs
 # --------------------------------------------------
-
 cat("\n=== Checking HVGs ===\n")
 
 if (!exists("hvg")) {
   cat("hvg is not defined; computing HVGs from sce_filtered...\n")
 
-  # Exclude ribosomal and mitochondrial genes
   genes_to_keep <- !grepl("^RP[LS]|^MT-|^Rp[l|s]|Mt", rownames(sce_filtered), ignore.case = TRUE)
 
-  # Compute HVGs
   dec <- modelGeneVar(sce_filtered, subset.row = genes_to_keep)
   hvg <- getTopHVGs(dec, n = 3000)
 
@@ -343,7 +300,6 @@ if (!exists("hvg")) {
   cat("Using predefined hvg, length:", length(hvg), "\n")
 }
 
-# Ensure hvg genes are in common_genes
 hvg <- intersect(hvg, common_genes)
 cat("HVGs after filtering (in common genes):", length(hvg), "\n")
 
@@ -352,13 +308,10 @@ if (length(hvg) < 500) {
 }
 
 # --------------------------------------------------
-
 # 10. Run SPOTlight deconvolution
 # --------------------------------------------------
-
 cat("\n=== Running SPOTlight deconvolution ===\n")
 
-# Check all required parameters
 cat("Checking parameters:\n")
 cat("sce_filtered dimensions:", dim(sce_filtered), "\n")
 cat("spatial_matrix dimensions:", dim(spatial_matrix), "\n")
@@ -366,20 +319,18 @@ cat("groups length:", length(colData(sce_filtered)$celltype), "\n")
 cat("mgs_df rows:", nrow(mgs_df), "\n")
 cat("hvg length:", length(hvg), "\n")
 
-# Ensure correct data format
 if (!is.matrix(spatial_matrix)) {
   spatial_matrix <- as.matrix(spatial_matrix)
 }
 
-# Set seed for reproducibility
 set.seed(123)
 tryCatch({
   res <- SPOTlight(
     x = sce_filtered,
     y = spatial_matrix,
     groups = as.character(colData(sce_filtered)$celltype),
-    mgs = as.data.frame(mgs_df),          # Key fix: convert to plain data.frame
-    hvg = hvg[1:min(3000, length(hvg))],  # Use up to 3000 HVGs first for stability
+    mgs = as.data.frame(mgs_df),
+    hvg = hvg[1:min(3000, length(hvg))],
     weight_id = "mean.AUC",
     group_id = "cluster",
     gene_id = "gene",
@@ -387,24 +338,22 @@ tryCatch({
     min_prop = 0.01
   )
 
-  cat("\n✅ SPOTlight deconvolution succeeded!\n")
+  cat("\nSPOTlight deconvolution succeeded!\n")
 
-  # Extract results
   mat <- res$mat
   mod <- res$NMF
 
   cat("Deconvolution matrix dimensions:", dim(mat), "\n")
   cat("Cell type proportions for the first 3 spots:\n")
   print(head(mat)[, 1:min(3, ncol(mat))])
+
+  # --------------------------------------------------
   # 11. Visualization
   # --------------------------------------------------
-
   cat("\nGenerating visualizations...\n")
 
-  # Set plotting parameters
   par(mfrow = c(2, 1))
 
-  # Visualization 1: not faceted
   p1 <- plotTopicProfiles(
     x = mod,
     y = colData(sce_filtered)$celltype,
@@ -415,7 +364,6 @@ tryCatch({
     theme(aspect.ratio = 1) +
     ggtitle("Topic Profiles (Non-faceted)")
 
-  # Visualization 2: faceted
   p2 <- plotTopicProfiles(
     x = mod,
     y = colData(sce_filtered)$celltype,
@@ -425,21 +373,17 @@ tryCatch({
   ) +
     ggtitle("Topic Profiles (Faceted by Cell Type)")
 
-  # Show plots
   print(p1)
   print(p2)
 
   # --------------------------------------------------
   # 12. Save results into the spatial data object
   # --------------------------------------------------
-
   cat("\nAdding results to the spatial data object...\n")
 
-  # Transpose proportion matrix to spots x cell types
   prop_df <- as.data.frame(t(mat))
   colnames(prop_df) <- paste0(colnames(prop_df), "_prop")
 
-  # Ensure ordering matches
   spot_names <- colnames(sp_data)
   common_spots <- intersect(spot_names, rownames(prop_df))
 
@@ -447,10 +391,9 @@ tryCatch({
     prop_df <- prop_df[common_spots, ]
     sp_data@meta.data <- cbind(sp_data@meta.data, prop_df)
 
-    # Compute dominant cell type
     sp_data$dominant_celltype <- colnames(mat)[apply(mat[common_spots, ], 1, which.max)]
 
-    cat("✅ Results successfully added to sp_data\n")
+    cat("Results successfully added to sp_data\n")
     cat("New metadata columns:\n")
     new_cols <- grep("_prop$|dominant_celltype", colnames(sp_data@meta.data), value = TRUE)
     print(head(new_cols))
@@ -461,18 +404,15 @@ tryCatch({
   # --------------------------------------------------
   # 13. Save results
   # --------------------------------------------------
-
-  # Save result objects
   saveRDS(res, "spotlight_results.rds")
   saveRDS(sp_data, "spatial_with_deconvolution.rds")
   write.csv(mat, "celltype_proportions.csv")
 
-  # Create summary statistics
   summary_stats <- data.frame(
     CellType = colnames(mat),
     MeanProportion = colMeans(mat),
     MaxProportion = apply(mat, 2, max),
-    SpotsDetected = colSums(mat > 0.05)  # Spots with proportion > 5%
+    SpotsDetected = colSums(mat > 0.05)
   )
 
   cat("\nCell type proportion summary:\n")
@@ -487,12 +427,10 @@ tryCatch({
   cat("4. deconvolution_summary.csv - deconvolution summary\n")
 
 }, error = function(e) {
-  cat("\n❌ SPOTlight analysis failed:", e$message, "\n")
+  cat("\nSPOTlight analysis failed:", e$message, "\n")
 
-  # Try simplified settings
   cat("\nRetrying with simplified settings...\n")
 
-  # Use fewer parameters
   res_simple <- SPOTlight(
     x = sce_filtered,
     y = spatial_matrix,
@@ -507,34 +445,27 @@ tryCatch({
 
   cat("Simplified run succeeded!\n")
 
-  # Save simplified results
   saveRDS(res_simple, "spotlight_results_simple.rds")
 
-  # Extract results
   mat_simple <- res_simple$mat
   write.csv(mat_simple, "celltype_proportions_simple.csv")
 
   cat("Simplified results saved\n")
 })
 
-# Define cell_types before extracting the feature matrix
 # --------------------------------------------------
-# Extract feature matrix (corrected version)
+# Extract NMF feature matrix
 # --------------------------------------------------
-
 cat("\n=== Extracting NMF feature matrix ===\n")
 
-# 1. Check the res object
 if (!exists("res")) {
   stop("Error: res does not exist. Run SPOTlight first.")
 }
 
-# 2. Get required objects from res
 if ("mat" %in% names(res)) {
-  mat <- res$mat  # Deconvolution matrix
-  mod <- res$NMF  # NMF model
+  mat <- res$mat
+  mod <- res$NMF
 
-  # 3. Define cell_types (from mat column names)
   cell_types <- colnames(mat)
   cat("Cell types from deconvolution matrix, count:", length(cell_types), "\n")
   cat("Cell types:", paste(cell_types, collapse = ", "), "\n")
@@ -542,15 +473,12 @@ if ("mat" %in% names(res)) {
   stop("Error: res has no mat element")
 }
 
-# 4. Check NMF model
 cat("\nChecking NMF model structure:\n")
 cat("NMF model class:", class(mod), "\n")
 
-# 5. Extract feature matrix
 if (inherits(mod, "NMFfit")) {
   cat("NMFfit detected; extracting feature matrix with NMF::basis()...\n")
 
-  # Ensure NMF package is loaded
   if (!requireNamespace("NMF", quietly = TRUE)) {
     install.packages("NMF")
   }
@@ -560,7 +488,6 @@ if (inherits(mod, "NMFfit")) {
   cat("Feature matrix extracted, dimensions:", dim(signature_matrix), "\n")
 
 } else {
-  # Try other possible names
   if ("w" %in% names(mod)) {
     signature_matrix <- mod$w
     cat("Feature matrix from mod$w, dimensions:", dim(signature_matrix), "\n")
@@ -575,26 +502,20 @@ if (inherits(mod, "NMFfit")) {
   }
 }
 
-# 6. Add row and column names to the feature matrix
 cat("\nAdding row and column names to the feature matrix...\n")
 
-# Add row names (gene names)
 if (exists("sce_filtered")) {
-  # Get gene names from sce_filtered
   all_genes <- rownames(sce_filtered)
   cat("Genes from sce_filtered, count:", length(all_genes), "\n")
 
   if (nrow(signature_matrix) <= length(all_genes)) {
-    # Use first n genes
     rownames(signature_matrix) <- all_genes[1:nrow(signature_matrix)]
     cat("Using first", nrow(signature_matrix), "genes as row names\n")
   } else {
-    # Create placeholders
     rownames(signature_matrix) <- paste0("Gene_", 1:nrow(signature_matrix))
     cat("Warning: feature matrix has more rows than available genes; using placeholders\n")
   }
 } else {
-  # Use spatial data gene names
   if (exists("sp_data")) {
     spatial_genes <- rownames(sp_data)
     if (nrow(signature_matrix) <= length(spatial_genes)) {
@@ -610,7 +531,6 @@ if (exists("sce_filtered")) {
   }
 }
 
-# Add column names (cell types)
 if (ncol(signature_matrix) == length(cell_types)) {
   colnames(signature_matrix) <- cell_types
   cat("Cell type column names set successfully\n")
@@ -619,50 +539,43 @@ if (ncol(signature_matrix) == length(cell_types)) {
   cat("Warning: feature matrix columns do not match number of cell types; using Topic names\n")
 }
 
-# 7. Save feature matrix
 write.csv(signature_matrix, "spotlight_signature_matrix.csv")
-cat("✅ Feature matrix saved to: spotlight_signature_matrix.csv\n")
+cat("Feature matrix saved to: spotlight_signature_matrix.csv\n")
 
-# 8. Show first few rows
 cat("\nFirst 5 rows and 5 columns of feature matrix:\n")
 print(signature_matrix[1:min(5, nrow(signature_matrix)),
                        1:min(5, ncol(signature_matrix))])
 
 # ============================================================================
-# SPOTlight core result visualization: spatial distribution maps (corrected)
-# Ensure objects such as `res`, `mat`, `decon_mtrx`, `sp_data` exist
+# SPOTlight core result visualization: spatial distribution maps
 # ============================================================================
 
 cat("\n=== Plotting core spatial distribution maps ===\n")
 
-# 1. Add deconvolution results to the Seurat object (key step)
+# 1. Add deconvolution results to the Seurat object
 cat("1. Integrating cell type proportions into spatial Seurat object...\n")
-decon_mtrx <- res$mat  # Deconvolution matrix (spots x cell types)
+decon_mtrx <- res$mat
 cell_types <- colnames(decon_mtrx)
 common_spots <- intersect(rownames(decon_mtrx), colnames(sp_data))
 
 if (length(common_spots) == nrow(decon_mtrx) && length(common_spots) == ncol(sp_data)) {
-  # Add one metadata column per cell type
   for (ct in cell_types) {
     sp_data[[paste0("SPOTlight_", ct)]] <- decon_mtrx[common_spots, ct]
   }
-  cat("   ✅ Created metadata columns for", length(cell_types), "cell types (e.g., SPOTlight_1).\n")
+  cat("   Created metadata columns for", length(cell_types), "cell types (e.g., SPOTlight_1).\n")
 
-  # Compute and add dominant cell type
   sp_data$dominant_celltype <- colnames(decon_mtrx)[apply(decon_mtrx, 1, which.max)]
-  cat("   ✅ Added 'dominant_celltype' column indicating dominant cell type per spot.\n")
+  cat("   Added 'dominant_celltype' column indicating dominant cell type per spot.\n")
 } else {
   stop("Error: spot count or names do not match. Check data alignment.")
 }
 
-# 2. Generate individual spatial distribution maps per cell type (using Seurat)
+# 2. Individual spatial distribution maps per cell type
 cat("\n2. Generating spatial distribution maps (Seurat SpatialFeaturePlot)...\n")
 
-# Confirm the spatial image name (IMPORTANT!)
-image_name <- "CK4"  # Confirm this matches the image name in sp_data
+image_name <- "CK4"
 cat("   Using image name:", image_name, "\n")
 
-# Open a PDF device to save all plots into one file
 pdf("all_celltype_spatial_distributions-CK.pdf", width = 10, height = 8)
 for (ct in cell_types) {
   feature_name <- paste0("SPOTlight_", ct)
@@ -670,68 +583,63 @@ for (ct in cell_types) {
 
   p <- SpatialFeaturePlot(
     object = sp_data,
-    features = feature_name,     # Feature to plot (the column we just added)
-    images = image_name,         # Specify image slice
-    pt.size.factor = 6,          # Point size, adjust based on spot density
-    crop = TRUE,                 # Do not crop, show full image
-    alpha = c(0.8, 1)            # Transparency
+    features = feature_name,
+    images = image_name,
+    pt.size.factor = 6,
+    crop = TRUE,
+    alpha = c(0.8, 1)
   ) +
   theme(aspect.ratio = 0.9) +
     scale_fill_gradientn(
-      colors = c("grey90", "red", "darkred"),  # Color gradient
+      colors = c("grey90", "red", "darkred"),
       name = "Proportion"
     ) +
     ggtitle(paste("Spatial Distribution - Cell Type", ct))
 
   print(p)
-
 }
 dev.off()
-cat("   ✅ All cell type distribution plots saved to: all_celltype_spatial_distributions-CK.pdf\n")
+cat("   All cell type distribution plots saved to: all_celltype_spatial_distributions-CK.pdf\n")
 
-# 3. (Optional) Generate spatial pie chart - using scatterpie
+# 3. Optional: spatial pie chart using scatterpie
 cat("\n3. Attempting spatial pie chart (scatterpie)...\n")
-if (require("scatterpie")) {
-  # Get spatial coordinates
+if (requireNamespace("scatterpie", quietly = TRUE)) {
   coords <- GetTissueCoordinates(sp_data, image = image_name)
-  # Ensure coordinate and proportion ordering match again
   plot_data <- cbind(coords[common_spots, ], decon_mtrx[common_spots, cell_types])
 
-  # Define colors (simplified; ggplot automatic allocation also works)
   library(RColorBrewer)
   my_pal <- colorRampPalette(brewer.pal(9, "Set1"))(length(cell_types))
 
   p_pie <- ggplot() +
     geom_scatterpie(
       data = plot_data,
-      aes(x = imagecol, y = imagerow),  # Confirm column names for coordinates (usually these two)
+      aes(x = imagecol, y = imagerow),
       cols = cell_types,
       color = NA,
-      pie_scale = 0.4,                  # Pie size, adjust based on spot spacing
+      pie_scale = 0.4,
       alpha = 0.8
     ) +
     scale_fill_manual(values = my_pal) +
-    coord_fixed() +                     # Keep aspect ratio
+    coord_fixed() +
     labs(title = "Spatial Scatterpie of Cell Type Proportions (CK)") +
-    theme_void() +                      # Empty background
+    theme_void() +
     theme(legend.position = "right")
 
-  # Adjust orientation per actual image (Visium often needs Y reversal)
   # p_pie <- p_pie + scale_y_reverse()
 
   ggsave("CK_spatial_scatterpie.pdf", plot = p_pie, width = 12, height = 9)
-  cat("   ✅ Spatial pie chart saved to: CK_spatial_scatterpie.pdf\n")
+  cat("   Spatial pie chart saved to: CK_spatial_scatterpie.pdf\n")
 } else {
-  cat("   ⚠️ 'scatterpie' not installed; skipping pie chart. Install with install.packages('scatterpie').\n")
+  cat("   'scatterpie' not installed; skipping pie chart. Install with install.packages('scatterpie').\n")
 }
 
 # 4. Save final results
 cat("\n4. Saving final Seurat object with deconvolution results...\n")
 saveRDS(sp_data, file = "sp_data_CK_with_spotlight_final.rds")
 write.csv(decon_mtrx, file = "CK_spotlight_cell_type_proportions_final.csv")
-cat("   ✅ Final object saved: sp_data_CK_with_spotlight_final.rds\n")
-cat("   ✅ Proportion matrix saved: CK_spotlight_cell_type_proportions_final.csv\n")
+cat("   Final object saved: sp_data_CK_with_spotlight_final.rds\n")
+cat("   Proportion matrix saved: CK_spotlight_cell_type_proportions_final.csv\n")
 
-cat("\n" + rep("=", 60) + "\n")
+cat("\n", paste(rep("=", 60), collapse = ""), "\n", sep = "")
 cat("Core spatial visualization complete! Check the generated PDF files.\n")
-cat(rep("=", 60) + "\n")
+cat(paste(rep("=", 60), collapse = ""), "\n", sep = "")
