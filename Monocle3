@@ -1,59 +1,44 @@
+############################################
 library(monocle3)
-library(stringr)
-library(ggplot2)
 library(Seurat)
-library(future)
-library(rhdf5)
+library(ggplot2)
 library(dplyr)
-library(data.table)
-library(Matrix)
-library(rjson)
-library(monocle3)
 library(patchwork)
 library(ComplexHeatmap)
 library(RColorBrewer)
-library(circlize)
 library(ggridges)
-library(circlize)
 library(viridis)
 library(ggplotify)
-############################################
+
 # Set working directory (modify as needed)
 output_dir <- "path/to/output/spat/monocle3"
 dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 setwd(output_dir)
 
 # 1. Load the Seurat object ------------------------------------------------
-# Assume the object is saved as RDS and contains SCT-normalized data
 CK_CRP1 <- readRDS("path/to/output/harmony_integration/combined_snRNA_anno.rds")
 cat("Seurat object loaded successfully\n")
 print(CK_CRP1)
 
-# Check Idents and cell type column
 cat("Current Idents:", unique(Idents(CK_CRP1)), "\n")
 cat("Metadata columns:", colnames(CK_CRP1@meta.data), "\n")
 
 # 2. Prepare data required by monocle3 ------------------------------------
-# Use counts from the SCT assay (raw counts; monocle3 needs raw counts)
 expression_matrix <- GetAssayData(CK_CRP1, assay = "SCT", layer = "counts")   # Seurat v5
 # If using Seurat v4, use slot = "counts" instead:
 # expression_matrix <- GetAssayData(CK_CRP1, assay = "SCT", slot = "counts")
 cat("Expression matrix dimensions:", dim(expression_matrix), "\n")
 
-# Gene metadata (must contain gene_short_name)
 gene_names <- rownames(expression_matrix)
 gene_annotation <- data.frame(
   gene_short_name = gene_names,
   row.names = gene_names
 )
 
-# Cell metadata (copy Seurat metadata and ensure celltype column exists)
 cell_metadata <- CK_CRP1@meta.data
-# Ensure a celltype column exists; otherwise create it from Idents
 if (!"celltype" %in% colnames(cell_metadata)) {
   cell_metadata$celltype <- as.character(Idents(CK_CRP1))
 }
-# Add a clusters column (optional, for monocle3 clustering)
 cell_metadata$clusters <- as.character(Idents(CK_CRP1))
 
 # 3. Create monocle3 cell_data_set object ---------------------------------
@@ -69,7 +54,6 @@ print(CK_CRP1_cds)
 CK_CRP1_cds <- preprocess_cds(CK_CRP1_cds, num_dim = 50)
 CK_CRP1_cds <- reduce_dimension(CK_CRP1_cds)
 
-# Save UMAP after dimensionality reduction
 p_umap <- plot_cells(
   CK_CRP1_cds,
   color_cells_by = "celltype",
@@ -108,7 +92,6 @@ p_trajectory <- plot_cells(
 ggsave("CK_CRP1_trajectory.pdf", p_trajectory, width = 8, height = 8)
 
 # 7. Select root node (based on a specific cell type, e.g., "Pe_St") ------
-# Assume the cell type column is celltype and the starting cell type is "Pe_St"
 root_celltype <- "Pe_St"
 cell_ids <- which(CK_CRP1_cds$celltype == root_celltype)
 
@@ -116,19 +99,15 @@ if (length(cell_ids) == 0) {
   stop(paste("Cell type", root_celltype, "not found; check metadata column names and values"))
 }
 
-# Get the closest principal graph vertex for each cell
 closest_vertex <- CK_CRP1_cds@principal_graph_aux[["UMAP"]]$pr_graph_cell_proj_closest_vertex
 closest_vertex <- as.matrix(closest_vertex[colnames(CK_CRP1_cds), ])
-# Choose the most frequent vertex as the root node
 root_pr_nodes <- igraph::V(principal_graph(CK_CRP1_cds)[["UMAP"]])$name[
   as.numeric(names(which.max(table(closest_vertex[cell_ids, ]))))
 ]
 cat("Selected root node:", root_pr_nodes, "\n")
 
-# Order cells (compute pseudotime)
 CK_CRP1_cds <- order_cells(CK_CRP1_cds, root_pr_nodes = root_pr_nodes)
 
-# Plot pseudotime result
 p_pseudotime <- plot_cells(
   CK_CRP1_cds,
   color_cells_by = "pseudotime",
@@ -146,20 +125,14 @@ cat("Running graph_test, this may take a few minutes...\n")
 sig_gene <- graph_test(CK_CRP1_cds, neighbor_graph = "principal_graph", cores = 8)
 write.csv(sig_gene, "graph_test_results.csv", row.names = TRUE)
 
-# 9. Prepare heatmap data (genes that change significantly with pseudotime
-#    and have high spatial autocorrelation) --------------------------------
-# Keep genes with q_value < 0.01 and high morans_I
+# 9. Prepare heatmap data -------------------------------------------------
 sig_gene_filtered <- subset(sig_gene, q_value < 0.01)
 genes_high_moran <- rownames(subset(sig_gene_filtered, morans_I >= quantile(sig_gene_filtered$morans_I, 0.75)))
 cat("Selected", length(genes_high_moran), "significant genes for the heatmap\n")
 
-# Extract expression matrix (use the data layer of SCT assay, i.e., log-normalized values)
-# Note: use the data layer because heatmaps usually show normalized expression
-# Get cell order based on pseudotime
 pseudotime_vec <- pseudotime(CK_CRP1_cds)
-cell_order <- order(pseudotime_vec)  # Sort cells in ascending pseudotime order
+cell_order <- order(pseudotime_vec)
 
-# Extract expression matrix and order cells by pseudotime
 pt_matrix <- GetAssayData(CK_CRP1, assay = "SCT", layer = "data")[genes_high_moran, cell_order, drop = FALSE]
 
 # Smoothing (optional, improves visualization)
@@ -173,9 +146,7 @@ pt_matrix[pt_matrix > 3] <- 3
 pt_matrix[pt_matrix < -3] <- -3
 
 # 10. Prepare heatmap annotation ------------------------------------------
-# Cell type annotation (in heatmap column order)
 celltype_ordered <- CK_CRP1$celltype[cell_order]
-# Create top annotation (colored by cell type)
 cluster_info <- data.frame(CellType = celltype_ordered, row.names = cell_order)
 cluster_colors <- setNames(brewer.pal(length(unique(cluster_info$CellType)), "Set3"),
                            sort(unique(cluster_info$CellType)))
@@ -187,7 +158,7 @@ top_anno <- HeatmapAnnotation(
   simple_anno_size = unit(0.3, "cm")
 )
 
-# 11. Read gene list to label (CSV file with at least a "gene" column) -----
+# 11. Read gene list to label ---------------------------------------------
 label_file <- "heatmap_gene_list.csv"
 if (file.exists(label_file)) {
   label_df <- read.csv(label_file, stringsAsFactors = FALSE)
@@ -230,24 +201,21 @@ heatmap <- Heatmap(
 
 # Extract actual group assignments and save gene group CSV
 ht_drawn <- draw(heatmap)
-row_order_list <- row_order(ht_drawn)  # Each element is an integer index of rows in that cluster
+row_order_list <- row_order(ht_drawn)
 cluster_map <- setNames(rep(NA, nrow(pt_matrix)), rownames(pt_matrix))
 for (i in seq_along(row_order_list)) {
-  # Get gene names by index
   genes_in_cluster <- rownames(pt_matrix)[row_order_list[[i]]]
   cluster_map[genes_in_cluster] <- i
 }
-# Build data frame
 gene_info <- data.frame(
   gene = rownames(pt_matrix),
   cluster_group = factor(cluster_map[rownames(pt_matrix)], levels = 1:k, labels = paste0("Cluster_", 1:k)),
-  # Note: make sure sig_gene rownames match pt_matrix rownames exactly, otherwise NAs appear
   sig_gene[rownames(pt_matrix), c("q_value", "morans_I", "p_value")],
   stringsAsFactors = FALSE
 )
 write.csv(gene_info, "pseudotime_gene_clusters.csv", row.names = FALSE)
 
-# 13. Draw ridge plot (code unchanged) ------------------------------------
+# 13. Draw ridge plot -----------------------------------------------------
 ridge_df <- data.frame(
   pseudotime = pseudotime_vec[cell_order],
   celltype = celltype_ordered
@@ -265,7 +233,6 @@ ridge_plot <- ggplot(ridge_df, aes(x = pseudotime, y = celltype)) +
   theme(legend.position = "none")
 
 # Convert ComplexHeatmap to a ggplot object
-library(ggplotify)
 ht_ggplot <- as.ggplot(heatmap)
 
 # 14. Combine -------------------------------------------------------------
