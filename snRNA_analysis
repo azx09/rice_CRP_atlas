@@ -1,0 +1,215 @@
+###################################
+library(tidyverse)
+library(glmGamPoi)
+library(ggthemes)
+library(ggrepel)
+library(harmony)
+library(patchwork)
+library(tidyr)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+library(sctransform)
+library(RColorBrewer)
+library(scCustomize)
+library(Nebulosa)
+library(viridis)
+library(ggsci)
+library(bluster)
+library(aricode)
+library(ClustAssess)
+
+#quality control
+# ----- 0. Set working directory and Seurat object to use -----
+output_dir <- " "
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+setwd(output_dir)
+
+# Specify the Seurat object name to use here (e.g., "CK_all" or "CK_all")
+object_name <- "CK_all"   # Modify according to actual situation
+
+# Check whether the object exists
+if (!exists(object_name)) {
+  stop(paste("Error: object", object_name, "does not exist. Please check."))
+}
+obj <- get(object_name)
+
+# Confirm that the object contains PCA reduction and clustering results
+if (!"pca" %in% Reductions(obj)) {
+  stop("PCA was not found in the object. Please run RunPCA first.")
+}
+if (!"seurat_clusters" %in% colnames(obj@meta.data)) {
+  stop("seurat_clusters was not found in the object. Please run FindClusters first.")
+}
+
+cat("Using object:", object_name, "\n")
+cat("Number of cells:", ncol(obj), "\n")
+cat("Number of clusters at current resolution:", length(unique(obj$seurat_clusters)), "\n")
+
+# ----- 1. Extract PCA matrix and adjacency graph -----
+# Use parameters consistent with the original analysis (dims = 1:40, k.param = 20)
+pca_matrix <- Embeddings(obj, reduction = "pca")[, 1:40]
+
+# Build adjacency graph (note: compute.SNN = FALSE returns an adjacency matrix)
+adj_matrix <- FindNeighbors(pca_matrix, 
+                            k.param = 20, 
+                            nn.method = "rann", 
+                            compute.SNN = FALSE)$nn
+
+cat("Adjacency matrix constructed, dimensions:", dim(adj_matrix), "\n")
+
+# ----- 2. Run clustering stability assessment -----
+set.seed(2024)   # Ensure reproducibility
+
+cat("Starting ClustAssess stability assessment, this may take a long time...\n")
+clust_stab_result <- assess_clustering_stability(
+    graph_adjacency_matrix = adj_matrix,
+    resolution = c(0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0),
+    n_repetitions = 10,
+    clustering_algorithm = 1,   # 1 = Louvain
+    verbose = TRUE
+)
+cat("Stability assessment completed.\n")
+
+# Optional: save the result object for direct loading later
+saveRDS(clust_stab_result, file = "clust_stab_result.rds")
+
+# ----- 3. Extract and save summary data (consistent with your previous code) -----
+cat("\nExtracting and saving data...\n")
+
+# 3.1 Get resolution list
+resolutions <- names(clust_stab_result$split_by_resolution$Louvain)
+resolutions <- as.numeric(resolutions)
+resolutions <- sort(resolutions)
+print(paste("Resolutions:", paste(resolutions, collapse = ", ")))
+
+# 3.2 Overall stability summary table
+summary_list <- list()
+for (res in resolutions) {
+  res_key <- as.character(res)
+  ecc_vec <- clust_stab_result$split_by_resolution$Louvain[[res_key]]$ecc
+  clusters_info <- clust_stab_result$split_by_resolution$Louvain[[res_key]]$clusters
+  n_clusters <- length(clusters_info)
+  summary_list[[res_key]] <- data.frame(
+    resolution = res,
+    n_clusters = n_clusters,
+    ecc_median = median(ecc_vec, na.rm = TRUE),
+    ecc_mean = mean(ecc_vec, na.rm = TRUE),
+    ecc_min = min(ecc_vec, na.rm = TRUE),
+    ecc_max = max(ecc_vec, na.rm = TRUE),
+    ecc_q25 = quantile(ecc_vec, 0.25, na.rm = TRUE),
+    ecc_q75 = quantile(ecc_vec, 0.75, na.rm = TRUE),
+    n_cells = length(ecc_vec)
+  )
+}
+summary_df <- do.call(rbind, summary_list)
+write.csv(summary_df, "clustering_stability_summary.csv", row.names = FALSE)
+
+# 3.3 ECC statistics for each k under each resolution
+cluster_stab_list <- list()
+for (res in resolutions) {
+  res_key <- as.character(res)
+  clusters_info <- clust_stab_result$split_by_resolution$Louvain[[res_key]]$clusters
+  for (k in names(clusters_info)) {
+    ecc_k <- clusters_info[[k]]$ecc
+    cluster_stab_list[[paste(res_key, k, sep = "_")]] <- data.frame(
+      resolution = res,
+      k = as.numeric(k),
+      ecc_median = median(ecc_k, na.rm = TRUE),
+      ecc_mean = mean(ecc_k, na.rm = TRUE),
+      ecc_min = min(ecc_k, na.rm = TRUE),
+      ecc_max = max(ecc_k, na.rm = TRUE),
+      n_cells = length(ecc_k)
+    )
+  }
+}
+cluster_stab_df <- do.call(rbind, cluster_stab_list)
+write.csv(cluster_stab_df, "clustering_stability_per_k.csv", row.names = FALSE)
+
+# 3.4 Data for resolution = 0.5 (the resolution actually used)
+res_target <- "0.5"
+if (res_target %in% names(clust_stab_result$split_by_resolution$Louvain)) {
+  stab_target <- summary_df[summary_df$resolution == 0.5, ]
+  write.csv(stab_target, paste0("clustering_stability_res", res_target, "_summary.csv"), row.names = FALSE)
+  
+  clusters_target <- clust_stab_result$split_by_resolution$Louvain[[res_target]]$clusters
+  ecc_per_k <- list()
+  for (k in names(clusters_target)) {
+    ecc_k <- clusters_target[[k]]$ecc
+    ecc_per_k[[k]] <- data.frame(
+      k = as.numeric(k),
+      ecc_median = median(ecc_k, na.rm = TRUE),
+      ecc_mean = mean(ecc_k, na.rm = TRUE),
+      ecc_min = min(ecc_k, na.rm = TRUE),
+      ecc_max = max(ecc_k, na.rm = TRUE),
+      n_cells = length(ecc_k)
+    )
+  }
+  ecc_per_k_df <- do.call(rbind, ecc_per_k)
+  write.csv(ecc_per_k_df, paste0("clustering_stability_res", res_target, "_per_k.csv"), row.names = FALSE)
+  cat("Resolution", res_target, "data extracted\n")
+} else {
+  warning("Resolution ", res_target, " does not exist")
+}
+
+# 3.5 Correspondence between resolution and number of clusters
+k_res_list <- list()
+for (k in names(clust_stab_result$split_by_k$Louvain)) {
+  for (res in resolutions) {
+    res_key <- as.character(res)
+    clusters_info <- clust_stab_result$split_by_resolution$Louvain[[res_key]]$clusters
+    if (k %in% names(clusters_info)) {
+      k_res_list[[paste(res_key, k, sep = "_")]] <- data.frame(
+        resolution = res,
+        n_clusters = as.numeric(k)
+      )
+      break
+    }
+  }
+}
+if (length(k_res_list) > 0) {
+  k_res_df <- do.call(rbind, k_res_list)
+  k_res_df <- unique(k_res_df)
+  k_res_df <- k_res_df[order(k_res_df$resolution), ]
+  write.csv(k_res_df, "resolution_vs_cluster_number.csv", row.names = FALSE)
+} else {
+  # Fallback
+  k_res_df <- data.frame(
+    resolution = resolutions,
+    n_clusters = sapply(resolutions, function(r) {
+      length(clust_stab_result$split_by_resolution$Louvain[[as.character(r)]]$clusters)
+    })
+  )
+  write.csv(k_res_df, "resolution_vs_cluster_number.csv", row.names = FALSE)
+}
+
+# ----- 4. Save plots -----
+cat("Generating plots...\n")
+p1 <- plot_clustering_overall_stability(clust_stab_result)
+ggsave("plot_clustering_overall_stability.pdf", plot = p1, width = 8, height = 6)
+#ggsave("plot_clustering_overall_stability.png", plot = p1, width = 8, height = 6, dpi = 300)
+
+p2 <- plot_clustering_per_value_stability(clust_stab_result, value_type = "resolution")
+ggsave("plot_clustering_per_value_stability.pdf", plot = p2, width = 10, height = 8)
+#ggsave("plot_clustering_per_value_stability.png", plot = p2, width = 10, height = 8, dpi = 300)
+
+p3 <- plot_k_resolution_corresp(clust_stab_result)
+ggsave("plot_k_resolution_corresp.pdf", plot = p3, width = 8, height = 6)
+#ggsave("plot_k_resolution_corresp.png", plot = p3, width = 8, height = 6, dpi = 300)
+
+# ----- Done -----
+cat("\n========== All results have been saved ==========\n")
+cat("Output directory:", getwd(), "\n")
+cat("Generated files:\n")
+cat("  - clustering_stability_summary.csv\n")
+cat("  - clustering_stability_per_k.csv\n")
+cat("  - clustering_stability_res0.5_summary.csv\n")
+cat("  - clustering_stability_res0.5_per_k.csv\n")
+cat("  - resolution_vs_cluster_number.csv\n")
+cat("  - plot_clustering_overall_stability.pdf/png\n")
+
+#
+cat("  - plot_clustering_per_value_stability.pdf/png\n")
+cat("  - plot_k_resolution_corresp.pdf/png\n")
+cat("  - clust_stab_result.rds (complete result object)\n")
