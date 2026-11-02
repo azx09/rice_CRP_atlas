@@ -1,19 +1,9 @@
-library(tidyverse)
-library(ggthemes)
-library(ggrepel)
-library(harmony)
-library(patchwork)
-library(tidyr)
-library(Seurat)
-library(dplyr)
-library(ggplot2)
-library(cowplot)
-library(sctransform)
-library(RColorBrewer)
-library(scCustomize)
-library(Nebulosa)
-library(viridis)
 ################################################
+
+library(Seurat)
+library(harmony)
+library(glmGamPoi)
+
 # Run SCT separately, then select 3000 shared highly variable genes
 sp_data <- readRDS("path/to/object/spat/CKL4_renameGeneName_anno.rds")
 sc_data <- readRDS("path/to/object/snRNA/CK_base.rds")
@@ -68,4 +58,4 @@ combined_3000 <- FindNeighbors(combined_3000, reduction = "harmony", dims = 1:40
 combined_3000 <- FindClusters(combined_3000, resolution = 2.0)
 DimPlot(combined_3000)
 
-# saveRDS(combined, file = "path/to/output/harmony_integration/combined_vst3000_SCT.rds")
+# saveRDS(combined_3000, file = "path/to/output/harmony_integration/combined_vst3000_SCT.rds")
