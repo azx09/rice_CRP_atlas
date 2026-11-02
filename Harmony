@@ -1,0 +1,71 @@
+library(tidyverse)
+library(ggthemes)
+library(ggrepel)
+library(harmony)
+library(patchwork)
+library(tidyr)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+library(sctransform)
+library(RColorBrewer)
+library(scCustomize)
+library(Nebulosa)
+library(viridis)
+################################################
+# Run SCT separately, then select 3000 shared highly variable genes
+sp_data <- readRDS("path/to/object/spat/CKL4_renameGeneName_anno.rds")
+sc_data <- readRDS("path/to/object/snRNA/CK_base.rds")
+
+# 1. Harmonize gene names
+common_genes <- intersect(rownames(sc_data), rownames(sp_data))
+sc_data <- subset(sc_data, features = common_genes)
+sp_data <- subset(sp_data, features = common_genes)
+
+# 2. Compute mitochondrial percentage
+mt_genes <- readLines("path/to/rice_mt_genes_mini.txt")
+mt_genes <- trimws(mt_genes)
+mt_genes <- mt_genes[mt_genes != ""]
+mt_present <- intersect(mt_genes, rownames(sp_data))
+sp_data$percent.mt <- PercentageFeatureSet(sp_data, features = mt_present)
+
+# 3. Add batch labels
+sc_data$dataset <- "snRNA"
+sp_data$dataset <- "spatial"
+
+# 4. Run SCTransform separately
+sc_data <- SCTransform(sc_data, vars.to.regress = "percent.mt",
+                       method = "glmGamPoi", verbose = FALSE)
+sp_data <- SCTransform(sp_data, assay = "Spatial", vars.to.regress = "percent.mt",
+                       method = "glmGamPoi", verbose = FALSE)
+
+# 5. Select consensus highly variable genes
+features <- SelectIntegrationFeatures(object.list = list(sc_data, sp_data),
+                                      nfeatures = 3000)
+
+# 6. Merge objects
+combined_3000 <- merge(sc_data, sp_data)
+
+# 7. Set highly variable genes (override automatic selection)
+VariableFeatures(combined_3000) <- features
+
+# 8. Dimensionality reduction and integration
+combined_3000 <- RunPCA(combined_3000, npcs = 50, verbose = FALSE)
+set.seed(123)
+combined_3000 <- RunHarmony(combined_3000,
+                            group.by.vars  = "dataset",
+                            reduction.use  = "pca",
+                            dims           = 1:40,
+                            seed           = 123)
+
+# 9. UMAP and clustering
+combined_3000 <- RunUMAP(combined_3000,
+                         reduction = "harmony",
+                         dims      = 1:40,
+                         seed      = 123)
+combined_3000 <- FindNeighbors(combined_3000, reduction = "harmony", dims = 1:40)
+combined_3000 <- FindClusters(combined_3000, resolution = 2.0)
+DimPlot(combined_3000)
+
+# saveRDS(combined, file = "path/to/output/harmony_integration/combined_vst3000_SCT.rds")
