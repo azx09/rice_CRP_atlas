@@ -16,3 +16,43 @@ library(Nebulosa)
 library(viridis)
 library(ggsci)
 #####################################
+seurat_obj=CK_CRP1
+counts_matrix <- as.matrix(GetAssayData(seurat_obj, assay = "SCT", layer = "counts"))
+results <- CytoTRACE(counts_matrix)
+seurat_obj$cytotrace_score <- results$CytoTRACE
+FeaturePlot(seurat_obj, features = "cytotrace_score", reduction = "umap") +
+  scale_color_gradient(low = "yellow", high = "red")
+cyto_scores <- results$CytoTRACE
+group_info <- seurat_obj$celltype 
+group_info[is.na(group_info)] <- "Unknown"
+plot_df <- data.frame(
+  CytoTRACE = cyto_scores,
+  Group = group_info
+)
+p <- ggplot(plot_df, aes(x = reorder(Group, CytoTRACE, FUN = median), y = CytoTRACE, fill = Group)) +
+  geom_boxplot(outlier.size = 0.5, alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "CytoTRACE Scores by celltype",
+    x = "celltype",
+    y = "CytoTRACE Score (higher = more potent)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+ggsave("CytoTRACE_boxplot.pdf", p, width = 8, height = 5)
+
+p2 <- ggplot(plot_df, aes(x = reorder(Group, CytoTRACE, FUN = median), y = CytoTRACE, fill = Group)) +
+  geom_boxplot(outlier.size = 0.5, alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 0.3, alpha = 0.5) +
+  theme_minimal() +
+  labs(
+    title = "CytoTRACE Scores by celltype (with jitter)",
+    x = "celltype",
+    y = "CytoTRACE Score"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+p2
+ggsave("CytoTRACE_boxplot_jitter.pdf", p2, width = 8, height = 5)
