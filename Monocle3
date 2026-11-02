@@ -10,7 +10,7 @@ library(ggridges)
 library(viridis)
 library(ggplotify)
 
-# Set working directory (modify as needed)
+# Set working directory
 output_dir <- "path/to/output/spat/monocle3"
 dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 setwd(output_dir)
@@ -91,7 +91,7 @@ p_trajectory <- plot_cells(
 )
 ggsave("CK_CRP1_trajectory.pdf", p_trajectory, width = 8, height = 8)
 
-# 7. Select root node (based on a specific cell type, e.g., "Pe_St") ------
+# 7. Select root node
 root_celltype <- "Pe_St"
 cell_ids <- which(CK_CRP1_cds$celltype == root_celltype)
 
