@@ -13,7 +13,7 @@ CK_all_subset <- subset(CK_all, idents = c("4","6","7","9","10","11","12","20"))
 sc_data <- CK_all_subset
 sc_data
 
-# 1. Convert seurat_clusters to character (optional but recommended)
+# 1. Convert seurat_clusters to character
 sc_data$celltype <- as.character(sc_data$seurat_clusters)
 # 2. Check the result
 head(sc_data$celltype)
@@ -144,7 +144,7 @@ cat("Cell type distribution:\n")
 print(table(mgs_df$cluster))
 
 # --------------------------------------------------
-# 3. Validate data (optional)
+# 3. Validate data 
 # --------------------------------------------------
 celltype_counts <- table(mgs_df$cluster)
 problematic_ct <- names(celltype_counts[celltype_counts < 2])
