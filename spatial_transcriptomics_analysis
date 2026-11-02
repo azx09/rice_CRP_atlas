@@ -16,3 +16,33 @@ library(Nebulosa)
 library(viridis)
 library(ggsci)
 ###############################################
+CKL4 <- CreateS1000Object(matrix_path="~/data/spat_matrix/CKL4/L4_heAuto", png_path="~/data/spat_matrix/CKL4/he_roi_small.png",  spot_radius =NULL, min.cells =5,min.features = 200)
+names(CKL4@assays)
+SpatialFeaturePlot(CKL4, features = "nCount_Spatial",slot="counts",pt.size = 5,alpha = c(0.5, 1),crop = FALSE) + theme(legend.position = "right")
+###############################################
+CKL4 <- SCTransform(CKL4, assay = "Spatial",method = "glmGamPoi", verbose = F)
+CKL4 <- RunPCA(CKL4, verbose = FALSE)
+ElbowPlot(CKL4, ndims = 100)
+CKL4 <- RunUMAP(CKL4, dims = 1:40, verbose = FALSE)
+CKL4 <- FindNeighbors(CKL4, dims = 1:40, verbose = FALSE)
+CKL4 <- FindClusters(CKL4, resolution = 2.5, verbose = FALSE)
+DimPlot(CKL4, label = TRUE)
+SpatialDimPlot( CKL4, crop=T)+
+  theme(aspect.ratio = 0.9)
+###############################################
+#修改颜色
+colour=c("#008B8B","#C18FC0","#698F3C","#D8549F","#7AC9F0","#825343","#4A93CB","#88898C","#F1572A","#C88447",  
+         "#CFD1D2","#4682B4","#77C585","#874F90","#FAA32B","#F4DAB3","#33A3AD","#FFB1BA","#86BD97","#45A3FA","#B9A7B9","#D5AF38",
+         "#65A579","#337FC2","#27BCEE","#FFE4B5","#8A2BE2","#228B22","#E9967A","#F5822A","#32CD32","#F0E68C","#FFFFE0","#EE82EE",
+         "#FF6347","#6A5ACD","#9932CC","#8B008B","#8B4513","#DEB887")
+Idents(CKL4)=CKL4$"seurat_clusters"
+#opt_clust为seurat clusters. 
+colors = colour[1:33]
+names(colors) <- Idents(CKL4) %>% levels() ## 命名非常重要 
+p1 <- SpatialDimPlot( CKL4, cols=colors,pt.size = 1.5,stroke=NA,label = T,label.size = 3,crop=T,repel=T)+
+  theme(aspect.ratio = 0.9) #aspect.ratio < 1：图形更宽（横向拉伸）,aspect.ratio > 1：图形更高（纵向拉伸）
+p1
+p2 <- DimPlot(CKL4, reduction = "umap", cols=colour, pt.size = 1.5, repel = TRUE,label= TRUE, label.size = 4)+
+  theme(aspect.ratio = 1)
+p2
+###############################################
